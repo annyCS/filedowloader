@@ -11,11 +11,16 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
-import java.util.Queue;
+import java.util.Deque;
+import java.util.NoSuchElementException;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.BrokenBarrierException;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.LinkedBlockingQueue;
 
 
 public class FileDownloader {
@@ -25,12 +30,16 @@ public class FileDownloader {
 	public static final int MAX_DOWNLOADS_CONCURRENTS	= 5;
 	
 	private List<Thread> threads;
-	private Queue<String> downloadsList;
-	private List<String> partsFile;
+	private Deque<String> downloadsList;
+	private Deque<String> partsFile;
+	private String currentDownload;
 	private CyclicBarrier barrier;
+	private boolean processFinished;
 	
 	
 	public FileDownloader(int maxths) {
+		processFinished = false;
+		
 		// threads del programa
 		threads = new ArrayList<Thread>(maxths);
 		
@@ -40,33 +49,48 @@ public class FileDownloader {
 		}
 				
 		// lista con las lineas del fichero de texto leido
-		downloadsList = new ConcurrentLinkedQueue<String>();
+		downloadsList = new ConcurrentLinkedDeque<String>();
 		
 		// lista con las partes a eliminar
-		partsFile = new ArrayList<>();
+		partsFile = new ConcurrentLinkedDeque<String>();
 		
+		// tarea a ejecutarse al finalizar una descarga
+		barrier = new CyclicBarrier(maxths, () -> downloadCompleted());
+	}
+	
+	
+	private void downloadCompleted() {
+		//downloadCompleted = true;
 		
+		// unimos las partes del archivo descargado
+		SplitAndMerge sm = new SplitAndMerge();
+		sm.mergeFile(DOWNLOADS_PATH, currentDownload);
 		
-		barrier = new CyclicBarrier(maxths, new Runnable(){
-			public void run() {
-				// Unimos los ficheros descargados
-				SplitAndMerge sm = new SplitAndMerge();
-				sm.mergeFile(DOWNLOADS_PATH, "nameFile");
-				
-				// eliminamos las partes del fichero
-				System.out.println("Descargado!");
-			}
-		});
+		// eliminamos las partes del fichero
+		Iterator<String> it = partsFile.iterator();
+		while ( it.hasNext() ) {
+			deleteDownloadFile(DOWNLOADS_PATH + "/" + it.next());
+		}
+		
+		partsFile.clear();	// se vacia la lista de partes para la nueva descarga
+		
+		System.out.println("\n------------------------> DOWNLOAD SUCCESSFUL!\n");
+		
+		// iniciamos la siguiente descarga
+		//downloadCompleted = false;
 	}
 
 	
-	
+	/**
+	 * 
+	 * @param downloadsFile
+	 */
 	public void process(String downloadsFile) {
 		
 		// se crea el directorio para almacenar los archivos descargados
 		createFolder();
 				
-		// se descarga el fichero que contiene los enlaces de descarga
+		// se descarga el fichero con los enlaces de descarga
 		if ( !downloadByURL(downloadsFile, DOWNLOAD_FILE) ) {
 			return;
 		}
@@ -76,6 +100,7 @@ public class FileDownloader {
 			readTextFile();
 		} catch (IOException e) {
 			System.err.println("Error when trying to read from the file: " + e.getMessage());
+			return;
 		}
 		
 		for (Thread th: threads) {
@@ -84,7 +109,10 @@ public class FileDownloader {
 	}
 	
 	
-	
+	/**
+	 * 
+	 * @throws IOException
+	 */
 	private void readTextFile() throws IOException {
 		
 		File file = new File(DOWNLOAD_FILE);
@@ -97,7 +125,7 @@ public class FileDownloader {
 				
 				// se va añadiendo cada enlace en la lista para descargas
 				while( (line = br.readLine()) != null ) {
-					downloadsList.add(line);
+					downloadsList.add(line.replaceAll("\\s",""));	// se "limpia" la linea de espacios, tabuladores, retornos
 				}
 				
 				br.close();
@@ -107,26 +135,38 @@ public class FileDownloader {
 			}
 		}
 		
-		deleteDownloadFile();
+		deleteDownloadFile(DOWNLOAD_FILE);
 	}
 	
-
+	
+	/**
+	 * 
+	 */
 	public void downloadFiles() {
 
-		while( !downloadsList.isEmpty() ) {
+		while ( !processFinished ) {
 			try {
+				System.out.println("-------PROCESO: " + Thread.currentThread().getName());
+				System.out.println("--------------------------------------------------------");
 				String linkFilePart = downloadsList.remove();
 				
-				if( linkFilePart.contains("Fichero") ) System.out.println("-----------------");
+				if( linkFilePart.contains("Fichero") ) {
+					// se extrae el nombre del archivo de descarga actual
+					currentDownload = linkFilePart.substring( linkFilePart.lastIndexOf(":")+1, linkFilePart.length());
+					System.out.println("-----------------");
+					System.out.println(currentDownload);
+				}
 				
 				// descarga de cada una de las partes de los enlaces
 				if( !linkFilePart.contains("Fichero") ) {
 					
-					// indicamos el enlace que se esta descargando
 					System.out.println("DONWLOADING... " + linkFilePart);
 					
-					String filename =  linkFilePart.substring(linkFilePart.lastIndexOf("/"), linkFilePart.length());
-					downloadByURL(linkFilePart, (DOWNLOADS_PATH + filename) );
+					// se extrae el nombre de la parte del archivo a descargar
+					String linkfile =  linkFilePart.substring(linkFilePart.lastIndexOf("/"), linkFilePart.length());
+					downloadByURL(linkFilePart, (DOWNLOADS_PATH + linkfile) );
+					
+					partsFile.add(linkfile);
 					
 				} else {
 					barrier.await();
@@ -134,11 +174,20 @@ public class FileDownloader {
 			}
 			catch (InterruptedException e) {}
 			catch (BrokenBarrierException e) {}
+			catch (NoSuchElementException e) {
+				processFinished = true;
+				return;
+			}
 		}
 	}
 	
 	
-	
+	/**
+	 * 
+	 * @param url
+	 * @param destinationPath
+	 * @return
+	 */
 	private boolean downloadByURL(String url, String destinationPath) {
 		
 		boolean succes = true;
@@ -175,22 +224,28 @@ public class FileDownloader {
 	}
 	
 	
-	
-	/** 
-	 * Elimina, si existe, el fichero de texto con los enlaces de descarga.
+	/**
+	 * Elimina, si existe, el fichero indicado.
+	 * @param filename
+	 * @throws IOException 
 	 */
-	private void deleteDownloadFile() {
+	private void deleteDownloadFile(String filename) {
 		try {
-			Files.deleteIfExists(Paths.get(DOWNLOAD_FILE));
-		} catch (IOException e) {
+			Files.deleteIfExists(Paths.get(filename));
+		} catch(IOException e) {
 			System.err.println("The file could not be removed: " + e.getMessage());
 		}
 	}
 	
 	
+	/**
+	 * 
+	 * @param args
+	 * @throws IOException
+	 */
 	public static void main(String[] args) throws IOException {
 		String downloadFile = "https://github.com/jesussanchezoro/PracticaPC/raw/master/descargas.txt";
-		FileDownloader fd = new FileDownloader(5);
+		FileDownloader fd = new FileDownloader(4);
 		fd.process(downloadFile);
 	}
 }
