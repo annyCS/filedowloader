@@ -29,33 +29,21 @@ public class FileDownloader {
 	public static final String DOWNLOAD_FILE			= "downloads/downloadfile";
 	public static final int MAX_DOWNLOADS_CONCURRENTS	= 5;
 	
-	private List<Thread> threads;
-	private Deque<String> downloadsList;
-	private Deque<String> partsFile;
-	private String currentDownload;
+	private Deque<String> downloadsList;	// lista con las lineas del fichero de descarga
+	private Deque<String> partsFile;		// lista con las partes descargadas del fichero
+	private String currentDownload;			// nombre del archivo actual a descargar
 	private CyclicBarrier barrier;
+	private int maxThreads;
 	private boolean processFinished;
 	
 	
 	public FileDownloader(int maxths) {
 		processFinished = false;
-		
-		// threads del programa
-		threads = new ArrayList<Thread>(maxths);
-		
-		// Creamos los hilo para las descargas
-		for (int i = 0; i < maxths; i++) {
-			threads.add(new Thread( () -> downloadFiles(), "ID-"+(i+1) ));
-		}
-				
-		// lista con las lineas del fichero de texto leido
-		downloadsList = new ConcurrentLinkedDeque<String>();
-		
-		// lista con las partes a eliminar
-		partsFile = new ConcurrentLinkedDeque<String>();
-		
-		// tarea a ejecutarse al finalizar una descarga
-		barrier = new CyclicBarrier(maxths, () -> downloadCompleted());
+
+		maxThreads		= maxths;
+		downloadsList	= new ConcurrentLinkedDeque<String>();
+		partsFile		= new ConcurrentLinkedDeque<String>();
+		barrier			= new CyclicBarrier(maxths, () -> downloadCompleted());
 	}
 	
 	
@@ -86,24 +74,29 @@ public class FileDownloader {
 	 * @param downloadsFile
 	 */
 	public void process(String downloadsFile) {
-		
-		// se crea el directorio para almacenar los archivos descargados
-		createFolder();
+		createFolder();		// directorio para almacenar los archivos descargados
 				
-		// se descarga el fichero con los enlaces de descarga
-		if ( !downloadByURL(downloadsFile, DOWNLOAD_FILE) ) {
+		if ( !downloadByURL(downloadsFile, DOWNLOAD_FILE) ) {	// se descarga el fichero con los enlaces a descargar
 			return;
 		}
 		
-		// Leemos el fichero de texto descargado
+		
 		try {
-			readTextFile();
+			readTextFile();		// lectura del fichero descargado
 		} catch (IOException e) {
 			System.err.println("Error when trying to read from the file: " + e.getMessage());
 			return;
 		}
 		
-		for (Thread th: threads) {
+		// creacion de los hilos de ejecucion de las descargas
+		for (int i = 0; i < maxThreads; i++) {
+			Thread th = new Thread(() -> {
+				try {
+					downloadFiles();
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+			}, "ID-"+(i+1));
 			th.start();
 		}
 	}
@@ -140,43 +133,40 @@ public class FileDownloader {
 	
 	
 	/**
+	 * @throws BrokenBarrierException 
+	 * @throws InterruptedException 
 	 * 
 	 */
-	public void downloadFiles() {
+	public void downloadFiles() throws InterruptedException, BrokenBarrierException {
 
-		while ( !processFinished ) {
-			try {
-				System.out.println("-------PROCESO: " + Thread.currentThread().getName());
-				System.out.println("--------------------------------------------------------");
-				String linkFilePart = downloadsList.remove();
+		while ( !downloadsList.isEmpty() ) {
+			
+			String line = downloadsList.getFirst();
+			
+			if( partsFile.isEmpty() && line.contains("Fichero:") ) {
 				
-				if( linkFilePart.contains("Fichero") ) {
-					// se extrae el nombre del archivo de descarga actual
-					currentDownload = linkFilePart.substring( linkFilePart.lastIndexOf(":")+1, linkFilePart.length());
-					System.out.println("-----------------");
-					System.out.println(currentDownload);
-				}
+				// se extrae siguiente archivo a descargar
+				String file = downloadsList.remove();
+				currentDownload = file.substring( file.lastIndexOf(":")+1, file.length());
+				System.out.println("-----------------");
+				System.out.println(currentDownload);
 				
-				// descarga de cada una de las partes de los enlaces
-				if( !linkFilePart.contains("Fichero") ) {
-					
-					System.out.println("DONWLOADING... " + linkFilePart);
-					
-					// se extrae el nombre de la parte del archivo a descargar
-					String linkfile =  linkFilePart.substring(linkFilePart.lastIndexOf("/"), linkFilePart.length());
-					downloadByURL(linkFilePart, (DOWNLOADS_PATH + linkfile) );
-					
-					partsFile.add(linkfile);
-					
-				} else {
-					barrier.await();
-				}
+				barrier.await();
 			}
-			catch (InterruptedException e) {}
-			catch (BrokenBarrierException e) {}
-			catch (NoSuchElementException e) {
-				processFinished = true;
-				return;
+			
+			// descarga de cada una de las partes de los enlaces
+			if( !line.contains("Fichero:") ) {
+				
+				System.out.println("DONWLOADING... " + line);
+				
+				// se extrae el nombre de la parte del archivo a descargar
+				String linkfile =  line.substring(line.lastIndexOf("/"), line.length());
+				downloadByURL(line, (DOWNLOADS_PATH + linkfile) );
+				
+				partsFile.add(linkfile);
+				
+			} else {
+				barrier.await();
 			}
 		}
 	}
@@ -245,7 +235,7 @@ public class FileDownloader {
 	 */
 	public static void main(String[] args) throws IOException {
 		String downloadFile = "https://github.com/jesussanchezoro/PracticaPC/raw/master/descargas.txt";
-		FileDownloader fd = new FileDownloader(4);
+		FileDownloader fd = new FileDownloader(1);
 		fd.process(downloadFile);
 	}
 }
