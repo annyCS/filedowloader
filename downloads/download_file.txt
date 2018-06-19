@@ -1,0 +1,20 @@
+Fichero: perry.jpg
+https://github.com/jesussanchezoro/PracticaPC/raw/master/perry.jpg.part0
+https://github.com/jesussanchezoro/PracticaPC/raw/master/perry.jpg.part1
+https://github.com/jesussanchezoro/PracticaPC/raw/master/perry.jpg.part2
+https://github.com/jesussanchezoro/PracticaPC/raw/master/perry.jpg.part3
+Fichero: jls8.pdf
+https://github.com/jesussanchezoro/PracticaPC/raw/master/jls8.pdf.part0
+https://github.com/jesussanchezoro/PracticaPC/raw/master/jls8.pdf.part1
+https://github.com/jesussanchezoro/PracticaPC/raw/master/jls8.pdf.part2
+https://github.com/jesussanchezoro/PracticaPC/raw/master/jls8.pdf.part3
+https://github.com/jesussanchezoro/PracticaPC/raw/master/jls8.pdf.part4
+https://github.com/jesussanchezoro/PracticaPC/raw/master/jls8.pdf.part5
+https://github.com/jesussanchezoro/PracticaPC/raw/master/jls8.pdf.part6
+https://github.com/jesussanchezoro/PracticaPC/raw/master/jls8.pdf.part7
+Fichero: quijote.docx
+https://github.com/jesussanchezoro/PracticaPC/raw/master/quijote.docx.part0
+https://github.com/jesussanchezoro/PracticaPC/raw/master/quijote.docx.part1
+https://github.com/jesussanchezoro/PracticaPC/raw/master/quijote.docx.part2
+https://github.com/jesussanchezoro/PracticaPC/raw/master/quijote.docx.part3
+https://github.com/jesussanchezoro/PracticaPC/raw/master/quijote.docx.part4

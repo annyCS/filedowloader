@@ -21,8 +21,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 public class FileDownloader {
 
-	public static final String DOWNLOADS_PATH			= "./downloads/";
-	public static final String DOWNLOAD_FILE			= "./downloads/download_file";
+	public static final String DOWNLOADS_PATH			= "downloads";
+	public static final String DOWNLOAD_FILE			= "downloads/download_file.txt";
 	public static final int MAX_DOWNLOADS_CONCURRENTS	= 5;
 	
 	private List<Thread> threads;
