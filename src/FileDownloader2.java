@@ -10,22 +10,27 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Deque;
+import java.util.NoSuchElementException;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.BrokenBarrierException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CyclicBarrier;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.LinkedBlockingQueue;
 
 
-public class FileDownloader {
+public class FileDownloader2 {
 
 	public static final String DOWNLOADS_PATH			= "downloads";
 	public static final String DOWNLOAD_FILE			= "downloads/downloadfile";
 	public static final int MAX_DOWNLOADS_CONCURRENTS	= 5;
-	
-	public static volatile long timeDownload = 0;
-	private Semaphore exmTimeDownload = new Semaphore(1);
 	
 	private Deque<String> downloadsList;	// lista con las lineas del fichero de descarga
 	private Deque<String> partsFile;		// lista con las partes descargadas del fichero
@@ -34,54 +39,43 @@ public class FileDownloader {
 	private int maxThreads;
 	private boolean processFinished;
 	
+	private List<Deque<String>> listalistas = new CopyOnWriteArrayList<Deque<String>>();
+	private Deque<String> namefiles = new ConcurrentLinkedDeque<String>();
 	
-	public FileDownloader(int maxths) {
+	
+	public FileDownloader2(int maxths) {
 		processFinished = false;
 
 		maxThreads		= maxths;
 		downloadsList	= new ConcurrentLinkedDeque<String>();
 		partsFile		= new ConcurrentLinkedDeque<String>();
-		barrier			= new CyclicBarrier(maxThreads, () -> downloadCompleted());
+		barrier			= new CyclicBarrier(maxths, () -> downloadCompleted());
+		
+		
 	}
 	
 	
-	private void downloadCompleted() {
-		
+	private void downloadCompleted() {	
 		// unimos las partes del archivo descargado
-		System.out.println("-----------------> MERGIN... ");
 		SplitAndMerge sm = new SplitAndMerge();
 		sm.mergeFile(DOWNLOADS_PATH, currentDownload);
 		
 		// eliminamos las partes del fichero
-		Iterator<String> it = partsFile.iterator();
+		Iterator<String> it = listalistas.get(0).iterator();
 		while ( it.hasNext() ) {
 			deleteDownloadFile(DOWNLOADS_PATH + "/" + it.next());
 		}
-
-		partsFile.clear();	// se vacia la lista de partes para la nueva descarga
-
-		// iniciamos la siguiente descarga
-		if( downloadsList.isEmpty() ) {
-			processFinished = true;
-			System.out.println("\n-----------------> SUCCESSFUL!");
-			System.out.println("TOTAL DOWNLOAD TIME: " + timeDownload + " ms.");
+		
+		System.out.println("\n------------------------> DOWNLOAD SUCCESSFUL!\n");
+		
+		if ( !listalistas.isEmpty() ) {
+			listalistas.remove(0); // se elimina el primer elemento para siguiente descarga
+			nextFileToDownload();
 		}
 		
 		else {
-			// extraemos el siguiente archivo a descargar
-			nextFileToDownload();
+			processFinished = true;
 		}
-	}
-	
-	
-	/**
-	 * Extrae el siguiente archivo a descargar
-	 */
-	private void nextFileToDownload() {
-		
-		currentDownload = downloadsList.remove();
-		currentDownload = currentDownload.substring( currentDownload.lastIndexOf(":")+1, currentDownload.length());
-		System.out.println("\n-----------------> DOWNLOADING... " + currentDownload);
 	}
 
 	
@@ -104,7 +98,6 @@ public class FileDownloader {
 			return;
 		}
 		
-		// extraemos el primer archivo a descargar
 		nextFileToDownload();
 		
 		// creacion de los hilos de ejecucion de las descargas
@@ -134,10 +127,26 @@ public class FileDownloader {
 				// leer el fichero
 				BufferedReader br = new BufferedReader(new FileReader(file));
 				String line = "";
+				String namefile = "";
+				int index = -1;
 				
 				// se va añadiendo cada enlace en la lista para descargas
 				while( (line = br.readLine()) != null ) {
-					downloadsList.add(line.replaceAll("\\s",""));	// se "limpia" la linea de espacios, tabuladores, retornos
+					line = line.replaceAll("\\s","");	// se "limpia" la linea de espacios, tabuladores, retornos
+					
+					if( line.contains("Fichero:") ) {
+						
+						namefile = line.substring( line.lastIndexOf(":")+1, line.length());
+						namefiles.add(namefile);	// lista de nombres
+
+						// si la linea leida contiene "FICHERO:" significa que es un archivo nuevo
+						index++;
+						listalistas.add(new ConcurrentLinkedDeque<String>());						
+					}
+					
+					else {
+						listalistas.get(index).add(line);
+					}
 				}
 				
 				br.close();
@@ -152,38 +161,38 @@ public class FileDownloader {
 	
 	
 	/**
+	 * Extrae el siguiente archivo a descargar
+	 */
+	private void nextFileToDownload() {
+		currentDownload = namefiles.poll();
+		System.out.println("-----------------> DOWNLOADING... " + currentDownload);
+	}
+	
+	
+	/**
 	 * @throws BrokenBarrierException 
 	 * @throws InterruptedException 
 	 * 
 	 */
 	public void downloadFiles() throws InterruptedException, BrokenBarrierException {
 
-		// mientras no se haya terminado de descargar todos los enlaces...
-		while( !processFinished ) {	
-			
-			// descarga de cada una de las partes de los enlaces
-			if ( !downloadsList.isEmpty() && !downloadsList.getFirst().contains("Fichero:") ) {
+		while ( !processFinished ) {
+			// mientras haya ficheros por descargar...
+			while ( !namefiles.isEmpty() ) {
 				
-				String line = downloadsList.remove();
-				System.out.println("DONWLOADING... " + line);
+				if ( !listalistas.get(0).isEmpty() ) {
+					String part = listalistas.get(0).remove();
+					System.out.println("DONWLOADING... " + part);
+					
+					// descarga de cada una de las partes del fichero
+					String link = part.substring(part.lastIndexOf("/"), part.length());
+					downloadByURL(part, (DOWNLOADS_PATH + link) );
+				}
 				
-				String link = line.substring(line.lastIndexOf("/"), line.length());
-				
-				// Seccion critica para la variable compartida que acumulará el tiempo total de descarga
-				exmTimeDownload.acquire();
-				
-				long timeAnt = System.currentTimeMillis();
-				downloadByURL(line, (DOWNLOADS_PATH + link) );
-				long timeDesp = System.currentTimeMillis();
-				timeDownload = timeDesp - timeAnt;
-				
-				exmTimeDownload.release();
-				
-				partsFile.add(link);
-			}
-			
-			else {
-				barrier.await();
+				else {
+					System.out.println("--ESPERO--");
+					barrier.await();
+				}
 			}
 		}
 	}
@@ -252,7 +261,7 @@ public class FileDownloader {
 	 */
 	public static void main(String[] args) throws IOException {
 		String downloadFile = "https://github.com/jesussanchezoro/PracticaPC/raw/master/descargas.txt";
-		FileDownloader fd = new FileDownloader(MAX_DOWNLOADS_CONCURRENTS);
+		FileDownloader2 fd = new FileDownloader2(5);
 		fd.process(downloadFile);
 	}
 }
